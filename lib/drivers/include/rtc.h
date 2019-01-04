@@ -391,6 +391,12 @@ int rtc_timer_get(int *year, int *month, int *day, int *hour, int *minute, int *
  */
 int rtc_init(void);
 
+int rtc_get_wday(int year, int month, int day);
+
+int rtc_get_yday(int year, int month, int day);
+
+
+
 #ifdef __cplusplus
 }
 #endif

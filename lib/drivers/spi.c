@@ -475,7 +475,6 @@ void spi_receive_data_normal_dma(dmac_channel_number_t dma_send_channel_num,
                                   size_t cmd_len, void *rx_buff, size_t rx_len)
 {
     configASSERT(spi_num < SPI_DEVICE_MAX && spi_num != 2);
-
     if(cmd_len == 0)
        spi_set_tmod(spi_num, SPI_TMOD_RECV);
     else
@@ -680,7 +679,6 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
                                   size_t cmd_len, uint8_t *rx_buff, size_t rx_len)
 {
     configASSERT(spi_num < SPI_DEVICE_MAX && spi_num != 2);
-
     volatile spi_t *spi_handle = spi[spi_num];
 
     uint8_t dfs_offset;
@@ -708,28 +706,27 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
     switch(frame_width)
     {
        case SPI_TRANS_INT:
-           write_cmd = malloc(cmd_len + rx_len);
+           write_cmd = malloc(cmd_len + rx_len + 128);
            for(i = 0; i < cmd_len; i++)
                write_cmd[i] = cmd_buff[i];
            read_buf = &write_cmd[i];
            v_recv_len = rx_len / 4;
            break;
        case SPI_TRANS_SHORT:
-           write_cmd = malloc(cmd_len + rx_len /2 * sizeof(uint32_t));
+           write_cmd = malloc(cmd_len + rx_len /2 * sizeof(uint32_t) + 128);
            for(i = 0; i < cmd_len; i++)
                write_cmd[i] = cmd_buff[i];
            read_buf = &write_cmd[i];
            v_recv_len = rx_len / 2;
            break;
        default:
-           write_cmd = malloc(cmd_len + rx_len * sizeof(uint32_t));
+           write_cmd = malloc(cmd_len + rx_len * sizeof(uint32_t) + 128);
            for(i = 0; i < cmd_len; i++)
                write_cmd[i] = cmd_buff[i];
            read_buf = &write_cmd[i];
            v_recv_len = rx_len;
            break;
     }
-
     spi_receive_data_normal_dma(dma_send_channel_num, dma_receive_channel_num, spi_num, chip_select, write_cmd, cmd_len, read_buf, v_recv_len);
 
     switch(frame_width)
@@ -747,7 +744,6 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
                rx_buff[i] = read_buf[i];
            break;
     }
-
     free(write_cmd);
 }
 

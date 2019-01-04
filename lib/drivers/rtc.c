@@ -255,7 +255,7 @@ static int rtc_year_is_leap(int year)
     return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
 }
 
-static int rtc_get_yday(int year, int month, int day)
+int rtc_get_yday(int year, int month, int day)
 {
     static const int days[2][13] =
     {
@@ -267,7 +267,7 @@ static int rtc_get_yday(int year, int month, int day)
     return days[leap][month] + day;
 }
 
-static int rtc_get_wday(int year, int month, int day)
+int rtc_get_wday(int year, int month, int day)
 {
     /* Magic method to get weekday */
     int weekday  = (day += month < 3 ? year-- : year - 2, 23 * month / 9 + day + 4 + year / 4 - year / 100 + year / 400) % 7;
