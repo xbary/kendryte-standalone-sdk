@@ -240,7 +240,7 @@ void gpiohs_set_pin_edge(uint8_t pin, gpio_pin_edge_t edge);
  * @param[in]   priority        Gpiohs pin interrupt priority
  * @param[in]   func            Gpiohs pin interrupt service routine
  */
-void gpiohs_set_irq(uint8_t pin, uint32_t priority, void(*func)());
+void gpiohs_set_irq(uint8_t pin, uint32_t priority, void(*func)(void *arg),void *arg);
 
 #ifdef __cplusplus
 }
