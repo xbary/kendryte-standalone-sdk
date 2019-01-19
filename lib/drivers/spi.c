@@ -644,7 +644,7 @@ void spi_receive_data_standard_dma(dmac_channel_number_t dma_send_channel_num,
     uint32_t data_bit_length = (spi_handle->ctrlr0 >> dfs_offset) & 0x1F;
     spi_transfer_width_t frame_width = spi_get_frame_size(data_bit_length);
 
-    size_t i;
+    size_t i, j;
 
     uint32_t *write_cmd;
     uint32_t *read_buf;
@@ -683,12 +683,22 @@ void spi_receive_data_standard_dma(dmac_channel_number_t dma_send_channel_num,
     switch(frame_width)
     {
         case SPI_TRANS_INT:
+            // for(i = 0; i < v_recv_len; i++)
+            //     ((uint32_t *)rx_buff)[i] = read_buf[i];
             for(i = 0; i < v_recv_len; i++)
-                ((uint32_t *)rx_buff)[i] = read_buf[i];
+            {
+                for(j=0; j<SPI_TRANS_INT; ++j)
+                    rx_buff[i*SPI_TRANS_INT+j] = ((uint8_t*)read_buf)[i*SPI_TRANS_INT+j];
+            }
             break;
         case SPI_TRANS_SHORT:
+            // for(i = 0; i < v_recv_len; i++)
+            //     ((uint16_t *)rx_buff)[i] = read_buf[i];
             for(i = 0; i < v_recv_len; i++)
-                ((uint16_t *)rx_buff)[i] = read_buf[i];
+            {
+                for(j=0; j<SPI_TRANS_SHORT; ++j)
+                    rx_buff[i*SPI_TRANS_SHORT+j] = ((uint8_t*)read_buf)[i*SPI_TRANS_SHORT+j];
+            }
             break;
         default:
             for(i = 0; i < v_recv_len; i++)
