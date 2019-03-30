@@ -20,6 +20,7 @@
 #include "sysctl.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 volatile spi_t *const spi[4] =
 {
@@ -222,6 +223,11 @@ void spi_send_data_normal(spi_device_num_t spi_num, spi_chip_select_t chip_selec
     uint32_t data_bit_length = (spi_handle->ctrlr0 >> dfs_offset) & 0x1F;
     spi_transfer_width_t frame_width = spi_get_frame_size(data_bit_length);
 
+    uint8_t v_misalign_flag = 0;
+    uint32_t v_send_data;
+    if((uintptr_t)tx_buff % frame_width)
+        v_misalign_flag = 1;
+
     spi_handle->ssienr = 0x01;
     spi_handle->ser = 1U << chip_select;
     uint32_t i = 0;
@@ -233,13 +239,37 @@ void spi_send_data_normal(spi_device_num_t spi_num, spi_chip_select_t chip_selec
         {
             case SPI_TRANS_INT:
                 fifo_len = fifo_len / 4 * 4;
-                for (index = 0; index < fifo_len / 4; index++)
-                    spi_handle->dr[0] = ((uint32_t *)tx_buff)[i++];
+                if(v_misalign_flag)
+                {
+                    for(index = 0; index < fifo_len; index +=4)
+                    {
+                        i += 4;
+                        memcpy(&v_send_data, tx_buff + i , 4);
+                        spi_handle->dr[0] = v_send_data;
+                    }
+                }
+                else
+                {
+                    for (index = 0; index < fifo_len / 4; index++)
+                        spi_handle->dr[0] = ((uint32_t *)tx_buff)[i++];
+                }
                 break;
             case SPI_TRANS_SHORT:
                 fifo_len = fifo_len / 2 * 2;
-                for (index = 0; index < fifo_len / 2; index++)
-                    spi_handle->dr[0] = ((uint16_t *)tx_buff)[i++];
+                if(v_misalign_flag)
+                {
+                    for(index = 0; index < fifo_len; index +=2)
+                    {
+                        i += 4;
+                        memcpy(&v_send_data, tx_buff + (i++), 2);
+                        spi_handle->dr[0] = v_send_data;
+                    }
+                }
+                else
+                {
+                    for (index = 0; index < fifo_len / 2; index++)
+                        spi_handle->dr[0] = ((uint16_t *)tx_buff)[i++];
+                }
                 break;
             default:
                 for (index = 0; index < fifo_len; index++)
@@ -779,7 +809,6 @@ void spi_receive_data_multiple(spi_device_num_t spi_num, spi_chip_select_t chip_
             case SPI_TRANS_SHORT:
                 for (index = 0; index < fifo_len; index++)
                   ((uint16_t *)rx_buff)[i++] = (uint16_t)spi_handle->dr[0];
-
                 break;
             default:
                   for (index = 0; index < fifo_len; index++)
@@ -829,10 +858,6 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
     switch(frame_width)
     {
        case SPI_TRANS_INT:
-           write_cmd = malloc(cmd_len + rx_len + 128);
-           for(i = 0; i < cmd_len; i++)
-               write_cmd[i] = cmd_buff[i];
-           read_buf = &write_cmd[i];
            v_recv_len = rx_len / 4;
            break;
        case SPI_TRANS_SHORT:
@@ -850,13 +875,14 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
            v_recv_len = rx_len;
            break;
     }
-    spi_receive_data_normal_dma(dma_send_channel_num, dma_receive_channel_num, spi_num, chip_select, write_cmd, cmd_len, read_buf, v_recv_len);
+    if(frame_width == SPI_TRANS_INT)
+        spi_receive_data_normal_dma(dma_send_channel_num, dma_receive_channel_num, spi_num, chip_select, cmd_buff, cmd_len, rx_buff, v_recv_len);
+    else
+        spi_receive_data_normal_dma(dma_send_channel_num, dma_receive_channel_num, spi_num, chip_select, write_cmd, cmd_len, read_buf, v_recv_len);
 
     switch(frame_width)
     {
        case SPI_TRANS_INT:
-           for(i = 0; i < v_recv_len; i++)
-               ((uint32_t *)rx_buff)[i] = read_buf[i];
            break;
        case SPI_TRANS_SHORT:
            for(i = 0; i < v_recv_len; i++)
@@ -867,7 +893,9 @@ void spi_receive_data_multiple_dma(dmac_channel_number_t dma_send_channel_num,
                rx_buff[i] = read_buf[i];
            break;
     }
-    free(write_cmd);
+
+    if(frame_width != SPI_TRANS_INT)
+        free(write_cmd);
 }
 
 
@@ -983,7 +1011,7 @@ static int spi_slave_irq(void *ctx)
     volatile spi_t *spi_handle = spi[2];
 
     spi_handle->imr = 0x00;
-    *(volatile uint32_t *)(spi_handle->icr);
+    *(volatile uint32_t *)((uintptr_t)spi_handle->icr);
     if (g_instance.status == IDLE)
         g_instance.status = COMMAND;
     return 0;
@@ -1008,7 +1036,7 @@ static void spi_slave_command_mode(void)
 {
     volatile spi_t *spi_handle = spi[2];
     uint8_t cmd_data[8], sum = 0;
-    
+
     spi_transfer_width_t frame_width = spi_get_frame_size(g_instance.data_bit_length - 1);
     uint32_t data_width = g_instance.data_bit_length / 8;
     spi_device_num_t spi_num = SPI_DEVICE_2;
@@ -1104,37 +1132,37 @@ static void spi_slave_command_mode(void)
         case SPI_TRANS_INT:
             for (uint32_t i = 0; i < g_instance.command.len / 4; i++)
             {
-                spi_handle->dr[0] = ((uint32_t *)g_instance.command.addr)[i];
+                spi_handle->dr[0] = ((uint32_t *)(uintptr_t)g_instance.command.addr)[i];
             }
             break;
         case SPI_TRANS_SHORT:
             for (uint32_t i = 0; i < g_instance.command.len / 2; i++)
             {
-                spi_handle->dr[0] = ((uint16_t *)g_instance.command.addr)[i];
+                spi_handle->dr[0] = ((uint16_t *)(uintptr_t)g_instance.command.addr)[i];
             }
             break;
         default:
             for (uint32_t i = 0; i < g_instance.command.len; i++)
             {
-                spi_handle->dr[0] = ((uint8_t *)g_instance.command.addr)[i];
+                spi_handle->dr[0] = ((uint8_t *)(uintptr_t)g_instance.command.addr)[i];
             }
             break;
         }
-    } 
+    }
     else if (g_instance.command.cmd == WRITE_DATA_BLOCK)
     {
         spi_handle->ctrlr0 = (0x0 << g_instance.work_mode) | (0x1 << g_instance.slv_oe) | ((32 - 1) << g_instance.dfs);
-        
+
         spi_handle->dmacr = 0x01;
         spi_handle->imr = 0x00;
         spi_handle->ssienr = 0x01;
 
         sysctl_dma_select(g_instance.dmac_channel, SYSCTL_DMA_SELECT_SSI0_RX_REQ + spi_num * 2);
 
-        dmac_set_single_mode(g_instance.dmac_channel, (void *)(&spi_handle->dr[0]), (void *)(g_instance.command.addr & 0xFFFFFFF0), DMAC_ADDR_NOCHANGE, DMAC_ADDR_INCREMENT,
+        dmac_set_single_mode(g_instance.dmac_channel, (void *)(&spi_handle->dr[0]), (void *)((uintptr_t)g_instance.command.addr & 0xFFFFFFF0), DMAC_ADDR_NOCHANGE, DMAC_ADDR_INCREMENT,
                             DMAC_MSIZE_4, DMAC_TRANS_WIDTH_32, g_instance.command.len * 4);
     }
-    else if (g_instance.command.cmd == READ_DATA_BLOCK) 
+    else if (g_instance.command.cmd == READ_DATA_BLOCK)
     {
         spi_handle->ctrlr0 = (0x0 << g_instance.work_mode) | (0x0 << g_instance.slv_oe) | ((32 - 1) << g_instance.dfs);
         spi_set_tmod(2, SPI_TMOD_TRANS);
@@ -1143,7 +1171,7 @@ static void spi_slave_command_mode(void)
         spi_handle->ssienr = 0x01;
 
         sysctl_dma_select(g_instance.dmac_channel, SYSCTL_DMA_SELECT_SSI0_TX_REQ + spi_num * 2);
-        dmac_set_single_mode(g_instance.dmac_channel, (void *)(g_instance.command.addr & 0xFFFFFFF0), (void *)(&spi_handle->dr[0]), DMAC_ADDR_INCREMENT, DMAC_ADDR_NOCHANGE,
+        dmac_set_single_mode(g_instance.dmac_channel, (void *)((uintptr_t)g_instance.command.addr & 0xFFFFFFF0), (void *)(&spi_handle->dr[0]), DMAC_ADDR_INCREMENT, DMAC_ADDR_NOCHANGE,
                             DMAC_MSIZE_4, DMAC_TRANS_WIDTH_32, g_instance.command.len * 4);
     }
     else
@@ -1226,19 +1254,19 @@ static void spi_slave_transfer_mode(void)
             case SPI_TRANS_INT:
                 for (uint32_t i = 0; i < command_len; i++)
                 {
-                    ((uint32_t *)g_instance.command.addr)[i] = spi_handle->dr[0];
+                    ((uint32_t *)(uintptr_t)g_instance.command.addr)[i] = spi_handle->dr[0];
                 }
                 break;
             case SPI_TRANS_SHORT:
                 for (uint32_t i = 0; i < command_len; i++)
                 {
-                    ((uint16_t *)g_instance.command.addr)[i] = spi_handle->dr[0];
+                    ((uint16_t *)(uintptr_t)g_instance.command.addr)[i] = spi_handle->dr[0];
                 }
                 break;
             default:
                 for (uint32_t i = 0; i < command_len; i++)
                 {
-                    ((uint8_t *)g_instance.command.addr)[i] = spi_handle->dr[0];
+                    ((uint8_t *)(uintptr_t)g_instance.command.addr)[i] = spi_handle->dr[0];
                 }
                 break;
             }
@@ -1296,7 +1324,7 @@ void spi_slave_config(uint8_t int_pin, uint8_t ready_pin, dmac_channel_number_t 
     gpiohs_set_drive_mode(g_instance.int_pin, GPIO_DM_INPUT_PULL_UP);
     gpiohs_set_pin_edge(g_instance.int_pin, GPIO_PE_RISING);
     gpiohs_set_irq(g_instance.int_pin, 3, spi_slave_cs_irq);
-    
+
     plic_set_priority(IRQN_SPI_SLAVE_INTERRUPT, 4);
     plic_irq_enable(IRQN_SPI_SLAVE_INTERRUPT);
     plic_irq_register(IRQN_SPI_SLAVE_INTERRUPT, spi_slave_irq, NULL);
